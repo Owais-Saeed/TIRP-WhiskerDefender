@@ -1,56 +1,41 @@
 <template>
-  <div class="modal-overlay" @click.self="$emit('close')"> <div class="scan-result-popup">
+  <div class="modal-overlay" @click.self="$emit('close')">
+    <div class="scan-result-popup">
       <button class="close-btn" @click="$emit('close')">&times;</button>
       <h2>Scan Complete</h2>
 
       <div class="status-header">
-        <img src="" alt="Alert" class="status-icon" v-if="scanData.malwareDetected" />
+        <img :src="statusIcon" alt="Status" class="status-icon" />
         <div class="status-text">
-            <span v-if="scanData.malwareDetected" class="malware-detected">Malware Detected!</span>
-            <span v-else class="no-malware">No Malware Detected</span>
-            <span v-if="scanData.riskLevel" class="risk-level" :class="riskClass">{{ scanData.riskLevel }}</span>
-        </div>
+          <span v-if="scanDataComputed.isMalware" class="malware-detected">Malware Detected!</span>
+          <span v-else class="no-malware">No Malware Detected</span>
+          </div>
       </div>
 
       <div class="file-details">
         <div>
           <strong>File Name:</strong>
-          <p>{{ scanData.fileName }}</p>
+          <p>{{ scanDataComputed.fileName }}</p>
         </div>
-        <div>
+        <div v-if="scanDataComputed.scanTime">
           <strong>Scan Time:</strong>
-          <p>{{ scanData.scanTime }}</p>
+          <p>{{ scanDataComputed.scanTime }}</p>
         </div>
-        <div>
-          <strong>File Image:</strong>
-          <div class="file-icon-placeholder">{{ scanData.fileImage }}</div> </div>
       </div>
 
-      <div class="threat-details-section" v-if="scanData.malwareDetected && scanData.threatDetails">
-        <h3>Threat Details</h3>
-        <table>
-          <thead>
-            <tr>
-              <th>Signature</th>
-              <th>Behavior</th>
-              <th>Severity</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>{{ scanData.threatDetails.signature }}</td>
-              <td>{{ scanData.threatDetails.behavior }}</td>
-              <td :class="severityClass(scanData.threatDetails.severity)">{{ scanData.threatDetails.severity }}</td>
-            </tr>
-          </tbody>
-        </table>
+      <div class="threat-info-simplified" v-if="scanDataComputed.isMalware">
+        <h3>Threat Information</h3>
+        <p><strong>Type:</strong> {{ scanDataComputed.malwareType }}</p>
+        <p><strong>Confidence:</strong> {{ scanDataComputed.confidenceScore?.toFixed(2) }}%</p>
       </div>
+      <div class="threat-info-simplified" v-else>
+        <p>The file appears to be safe.</p>
+      </div>
+
 
       <div class="actions">
-        <button class="action-btn reanalyze-btn">Reanalyze</button>
-        <button class="action-btn details-btn">More Details</button>
-        <button class="action-btn download-btn">Download</button>
-      </div>
+        <button class="action-btn reanalyze-btn" @click="reanalyze">Reanalyze</button>
+        </div>
     </div>
   </div>
 </template>
@@ -61,33 +46,49 @@ export default {
   props: {
     scanData: {
       type: Object,
-      required: true
+      required: true,
+      default: () => ({ // Sensible defaults for a cleaner initial render
+        fileName: 'N/A',
+        isMalware: false,
+        malwareType: 'N/A',
+        confidenceScore: 0,
+        scanTime: 'N/A'
+      })
     }
   },
   computed: {
-    riskClass() {
-      if (!this.scanData.riskLevel) return '';
-      return this.scanData.riskLevel.toLowerCase().replace(' ', '-'); // e.g., 'high-risk'
+    // Use a computed property to handle potential undefined scanData on initial load
+    scanDataComputed() {
+      return this.scanData || this.$props.scanData.default();
+    },
+    statusIcon() {
+      // Ensure you have these images in your public/assets folder or use other icons
+      if (this.scanDataComputed.isMalware) {
+        return '/img/malware_icon.png'; // Replace with your actual malware icon path
+      }
+      return '/img/safe_icon.png'; // Replace with your actual safe icon path
     }
+    // riskClass can be removed if riskLevel is not a primary display item anymore
   },
   methods: {
-      severityClass(severity) {
-          if (!severity) return '';
-          return `severity-${severity.toLowerCase()}`;
-      }
+    // severityClass can be removed if not used
+    reanalyze() {
+      this.$emit('reanalyze-request', this.scanDataComputed.fileName);
+      this.$emit('close');
+    }
   }
-  // Add methods for reanalyze, more details, download
 };
 </script>
 
 <style scoped>
+/* Using your provided styles - no changes needed here unless you want to adjust for the simplified content */
 .modal-overlay {
   position: fixed;
   top: 0;
   left: 0;
   width: 100%;
   height: 100%;
-  background-color: rgba(0, 0, 0, 0.5); /* Semi-transparent background */
+  background-color: rgba(0, 0, 0, 0.5);
   display: flex;
   justify-content: center;
   align-items: center;
@@ -100,8 +101,8 @@ export default {
   border-radius: 8px;
   box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
   width: 90%;
-  max-width: 600px; /* Adjust as per design */
-  position: relative; /* For close button positioning */
+  max-width: 500px; /* Can make it a bit narrower for simpler content */
+  position: relative;
 }
 
 .close-btn {
@@ -120,7 +121,7 @@ export default {
 
 .scan-result-popup h2 {
   margin-top: 0;
-  margin-bottom: 15px;
+  margin-bottom: 20px; /* Added more space */
   font-size: 1.5em;
   color: #333;
   text-align: center;
@@ -135,115 +136,73 @@ export default {
 }
 
 .status-icon {
-    width: 50px; /* Adjust as needed */
-    height: 50px;
+    width: 40px; /* Adjusted size */
+    height: 40px;
     margin-right: 15px;
-    /* Add your red-eyed cat image to src/assets, e.g., cat-alert-logo.png */
+    /* You'll need to provide actual image paths for statusIcon computed property */
 }
 
 .status-text .malware-detected {
-    font-size: 1.2em;
+    font-size: 1.25em; /* Slightly adjusted */
     font-weight: bold;
-    color: #d9534f; /* Red color */
+    color: #d9534f; 
     display: block;
 }
 .status-text .no-malware {
-    font-size: 1.2em;
+    font-size: 1.25em; /* Slightly adjusted */
     font-weight: bold;
-    color: #5cb85c; /* Green color */
+    color: #5cb85c; 
     display: block;
 }
 
-.risk-level {
-    display: inline-block;
-    padding: 3px 8px;
-    border-radius: 4px;
-    font-size: 0.9em;
-    font-weight: bold;
-    color: white;
-    margin-top: 5px;
-}
-.high-risk {
-    background-color: #d9534f; /* Red for high risk */
-}
-/* Add other risk level classes as needed (e.g., medium-risk, low-risk) */
-
+/* Risk level display is removed from the template, so .risk-level and .high-risk can be removed if not used elsewhere */
 
 .file-details {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 15px;
+  /* display: grid; */ /* Can simplify if fewer details */
+  /* grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); */
+  /* gap: 15px; */
   margin-bottom: 20px;
+  font-size: 0.95em; /* Slightly larger base font */
 }
 
 .file-details div {
-  font-size: 0.9em;
+  margin-bottom: 8px; /* Space between file detail items */
 }
 .file-details strong {
     display: block;
     color: #555;
-    margin-bottom: 3px;
+    margin-bottom: 4px; /* More space */
 }
 .file-details p {
   margin: 0;
   color: #333;
 }
 
-.file-icon-placeholder {
-  width: 50px;
-  height: 60px;
-  background-color: #eee; /* Placeholder, replace with actual PDF icon/image */
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  border-radius: 4px;
-  font-weight: bold;
-  color: #777;
-}
+/* Removed .file-icon-placeholder as it's not in the simplified template */
 
-.threat-details-section {
+.threat-info-simplified {
   margin-bottom: 25px;
+  padding: 15px;
+  background-color: #f9f9f9;
+  border-radius: 6px;
 }
-.threat-details-section h3 {
+.threat-info-simplified h3 {
     font-size: 1.1em;
     color: #444;
+    margin-top: 0;
     margin-bottom: 10px;
 }
-
-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.9em;
+.threat-info-simplified p {
+  margin: 5px 0;
+  font-size: 1em;
 }
 
-th, td {
-  border: 1px solid #ddd;
-  padding: 8px;
-  text-align: left;
-}
 
-th {
-  background-color: #f9f9f9;
-  font-weight: bold;
-  color: #555;
-}
-.severity-high {
-    color: #d9534f; /* Red */
-    font-weight: bold;
-}
-.severity-medium {
-    color: #f0ad4e; /* Orange */
-    font-weight: bold;
-}
-.severity-low {
-    color: #5bc0de; /* Blue/Info */
-    font-weight: bold;
-}
-
+/* Table styles for threat-details-section can be removed if you're not using the table anymore */
 
 .actions {
   display: flex;
-  justify-content: flex-end; /* Align buttons to the right as in design */
+  justify-content: flex-end; 
   gap: 10px;
   margin-top: 20px;
 }
@@ -261,20 +220,8 @@ th {
     background-color: #e9e9e9;
 }
 
+/* .details-btn and .download-btn can be removed if not used */
 .reanalyze-btn {
   /* Add specific styles if needed */
-}
-
-.details-btn {
-  /* Add specific styles if needed */
-}
-
-.download-btn {
-  background-color: #007bff; /* Blue for primary action */
-  color: white;
-  border-color: #007bff;
-}
-.download-btn:hover {
-  background-color: #0056b3;
 }
 </style>

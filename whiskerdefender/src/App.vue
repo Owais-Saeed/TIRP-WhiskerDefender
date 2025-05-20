@@ -43,33 +43,47 @@ export default {
       console.log('File selected:', file.name);
       // You might want to immediately show some feedback or enable the "Run Pawtection" button
     },
-    initiateScan() {
+    initiateScan() 
+    {
       if (!this.uploadedFile) {
         alert('Please upload a file first!');
         return;
       }
       console.log('Initiating scan for:', this.uploadedFile.name);
-      // --- THIS IS WHERE YOU'LL INTEGRATE WITH YOUR BACKEND/ML MODEL ---
-      // 1. Send `this.uploadedFile` to your backend.
-      // 2. Backend processes the file using your hybrid ML model.
-      // 3. Backend returns scan results.
 
-      // For now, let's simulate a response:
-      setTimeout(() => { // Simulate network delay
-        this.scanResultData = {
-          fileName: this.uploadedFile.name,
-          scanTime: '4.3s', // Or calculate actual time
-          fileImage: 'PDF', // Determine based on file type
-          malwareDetected: true,
-          riskLevel: 'High Risk',
-          threatDetails: {
-            signature: 'Trojan.Gen.ML',
-            behavior: 'Keylogging & Encryption Activity',
-            severity: 'High'
-          }
-        };
-        this.showScanResult = true;
-      }, 2000);
+      // // For now, let's simulate a response:
+      // setTimeout(() => { // Simulate network delay
+      //   this.scanResultData = {
+      //     fileName: this.uploadedFile.name,
+      //     scanTime: '4.3s', // Or calculate actual time
+      //     fileImage: 'PDF', // Determine based on file type
+      //     malwareDetected: true,
+      //     riskLevel: 'High Risk',
+      //     threatDetails: {
+      //       signature: 'Trojan.Gen.ML',
+      //       behavior: 'Keylogging & Encryption Activity',
+      //       severity: 'High'
+      //     }
+      //   };
+      //   this.showScanResult = true;
+      // }, 2000);
+
+      const formData = new FormData();
+      formData.append('file', this.uploadedFile);
+
+      fetch('http://localhost:5000/scan', {  // adjust if using a proxy
+        method: 'POST',
+        body: formData
+      })
+        .then(res => res.json())
+        .then(data => {
+          this.scanResultData = data;
+          this.showScanResult = true;
+        })
+        .catch(err => {
+          console.error("Scan error:", err);
+          alert('Scan failed!');
+        });
     },
     exploreMore() {
       console.log('Explore more clicked');
