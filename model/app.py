@@ -10,12 +10,9 @@ import numpy as np
 import pandas as pd
 from tensorflow.keras.models import load_model
 import logging
-import datetime # For timestamp and date calculations
-import random # For dummy data generation
-
-# --- Firebase Firestore Integration (COMMENTED OUT FOR DUMMY DATA) ---
-# from firebase_admin import credentials, firestore, initialize_app as initialize_firebase_app, get_app as get_firebase_app
-# from google.cloud.firestore_v1.base_query import FieldFilter
+import datetime 
+import random 
+import shutil # For more robust directory removal
 
 # --- Custom Feature Extraction (for .exe files) ---
 from extract_features import extract_static_features
@@ -29,41 +26,13 @@ ALLOWED_EXTENSIONS = {'exe', 'csv'}
 MODEL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
 
 # --- Logging Setup ---
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+# Ensure the root logger is configured to see logs from other modules if they use logging.
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__) # Logger for this specific app.py module
 
 # --- Firebase Initialization (COMMENTED OUT FOR DUMMY DATA) ---
-db = None # No database client for dummy data mode
-# app_id_str = 'dummy-app-id-local' # Define a dummy app_id if any logic still references it
-# try:
-#     app_id_str = os.environ.get('__APP_ID', 'default-flask-app-id')
-#     try:
-#         firebase_app = get_firebase_app()
-#         logger.info("Firebase app already initialized.")
-#     except ValueError:
-#         if os.environ.get('GOOGLE_APPLICATION_CREDENTIALS'):
-#              initialize_firebase_app()
-#              logger.info("Firebase app initialized with application default credentials.")
-#              firebase_app = get_firebase_app() # Get the app instance
-#         else:
-#             try:
-#                 initialize_firebase_app() 
-#                 logger.info("Firebase app initialized (basic).")
-#                 firebase_app = get_firebase_app() 
-#             except Exception as fb_init_e:
-#                 logger.warning(f"Could not initialize Firebase Admin SDK (basic init failed: {fb_init_e}). Firestore features will be disabled.")
-#                 firebase_app = None
-#     if firebase_app:
-#         db = firestore.client()
-#         logger.info("Firestore client obtained.")
-#     else:
-#         db = None
-#         logger.warning("Firestore client NOT obtained. Scan history will not be saved.")
-# except Exception as e:
-#     logger.error(f"Error during Firebase initialization: {e}", exc_info=True)
-#     db = None
+db = None 
 logger.info("Running in DUMMY DATA mode. Firestore is disabled.")
-
 
 # --- Load Models and Artifacts (Once at Startup) ---
 MODELS_LOADED = False
@@ -113,7 +82,6 @@ def scan_file_route():
         logger.error("Scan attempt failed: Models not loaded. Service unavailable.")
         return jsonify({'status': 'error', 'message': 'Service unavailable: Essential models are not loaded.'}), 503
 
-    # ... (rest of your file upload and initial validation logic from previous app.py) ...
     if 'file' not in request.files:
         logger.warning("Bad request: 'file' part missing from request.")
         return jsonify({'status': 'error', 'message': 'No file part in the request. Ensure the form field name is "file".'}), 400
@@ -130,21 +98,21 @@ def scan_file_route():
         logger.warning(f"Bad request: File type '{file_ext}' not allowed for '{filename}'.")
         return jsonify({'status': 'error', 'message': f'File type not allowed. Only {", ".join(ALLOWED_EXTENSIONS)} are supported.'}), 400
 
-    request_temp_dir = tempfile.mkdtemp(dir=UPLOAD_FOLDER)
-    temp_file_path = os.path.join(request_temp_dir, filename)
-    
-    input_df = None
+    request_temp_dir = None 
+    temp_file_path = None   
 
     try:
+        request_temp_dir = tempfile.mkdtemp(dir=UPLOAD_FOLDER)
+        temp_file_path = os.path.join(request_temp_dir, filename)
         file.save(temp_file_path)
         logger.info(f"File '{filename}' (type: {file_ext}) temporarily saved to: {temp_file_path}")
 
-        # --- 1. Feature Extraction or Loading ---
-        # ... (Your existing logic for handling .exe and .csv files to populate input_df) ...
+        input_df = None
         if file_ext == 'exe':
             logger.info(f"Processing .exe file: {filename}")
             raw_features_dict = extract_static_features(temp_file_path, expected_feature_names)
-            if raw_features_dict is None:
+            logger.debug(f"Raw features extracted from EXE '{filename}': {raw_features_dict}") # ADDED LOG
+            if raw_features_dict is None: 
                 logger.error(f"Static feature extraction returned None for .exe: '{filename}'.")
                 return jsonify({'status': 'error', 'message': 'Failed to extract features from .exe (file might be corrupted or not a valid PE).'}), 500
             input_df = pd.DataFrame([raw_features_dict])
@@ -169,7 +137,7 @@ def scan_file_route():
                         logger.error(f"CSV '{filename}' (original format) did not yield correct number of feature columns.")
                         return jsonify({'status': 'error', 'message': 'CSV format (original type) error: Incorrect number of features after processing.'}), 400
                 else:
-                    logger.error(f"CSV '{filename}' column structure does not match expected formats.")
+                    logger.error(f"CSV '{filename}' column structure does not match expected formats. Columns found: {list(df_row_to_process.columns)}")
                     return jsonify({'status': 'error', 'message': 'CSV column structure mismatch.'}), 400
             except Exception as e:
                 logger.error(f"Error reading or processing CSV '{filename}': {e}", exc_info=True)
@@ -178,15 +146,18 @@ def scan_file_route():
         if input_df is None:
              logger.critical(f"Internal error: input_df not populated for {filename}.")
              return jsonify({'status': 'error', 'message': 'Internal server error processing file input.'}), 500
+        
+        logger.debug(f"Input DataFrame for '{filename}' before column alignment (head): \n{input_df.head()}") # ADDED LOG
 
-        # --- 2. Prepare DataFrame for Model ---
-        # ... (Your existing logic for validating and ordering input_df columns) ...
         try:
             missing_input_cols = [col for col in expected_feature_names if col not in input_df.columns]
             if missing_input_cols:
                 logger.error(f"Input DataFrame for '{filename}' is missing expected columns: {missing_input_cols}")
                 return jsonify({'status': 'error', 'message': f'Processed input is missing required feature columns: {", ".join(missing_input_cols)}.'}), 400
             input_df = input_df[expected_feature_names] 
+            logger.debug(f"Input DataFrame for '{filename}' after column alignment (dtypes): \n{input_df.dtypes}") # ADDED LOG
+            logger.debug(f"Input DataFrame for '{filename}' NaN check: {input_df.isnull().sum().sum()} NaNs") # ADDED LOG
+
         except KeyError as e:
             logger.error(f"KeyError during DataFrame column alignment for '{filename}': {e}.", exc_info=True)
             return jsonify({'status': 'error', 'message': f'Feature mismatch error: An expected feature ({str(e)}) was not found.'}), 500
@@ -194,16 +165,14 @@ def scan_file_route():
             logger.error(f"Error aligning DataFrame columns for '{filename}': {e}", exc_info=True)
             return jsonify({'status': 'error', 'message': f'Internal error preparing features for model: {str(e)}'}), 500
 
-        # --- 3. Scale Features ---
-        # ... (Your existing scaling logic) ...
         try:
             X_scaled = scaler.transform(input_df)
+            logger.debug(f"X_scaled for '{filename}' (sample): {X_scaled[0, :10] if X_scaled.shape[1] > 10 else X_scaled}") # ADDED LOG (sample)
         except Exception as e:
             logger.error(f"Error during feature scaling for '{filename}': {e}", exc_info=True)
+            logger.error(f"Data causing scaling error (first 5 rows, all columns): \n{input_df.head()}") # Log data before scaling
             return jsonify({'status': 'error', 'message': f'Feature scaling error: {str(e)}'}), 500
             
-        # --- 4. Make Predictions ---
-        # ... (Your existing prediction logic to determine ae_is_malware, final_type_label, confidence_to_display, risk_level, mse) ...
         ae_is_malware = False
         rf_prediction_label_from_model = "Error"
         confidence_to_display = 0.0
@@ -215,10 +184,12 @@ def scan_file_route():
             reconstructed = autoencoder.predict(X_scaled)
             mse = np.mean(np.square(X_scaled - reconstructed), axis=1)[0]
             ae_is_malware = bool(mse > mse_threshold)
+            logger.info(f"AE for '{filename}': MSE={mse:.6f}, Threshold={mse_threshold:.6f}, AE_is_Malware={ae_is_malware}") # ADDED LOG
 
             rf_pred_raw_idx_or_label = rf_model.predict(X_scaled)[0]
             rf_proba_vector = rf_model.predict_proba(X_scaled)[0]
-            
+            logger.debug(f"RF for '{filename}': Raw prediction={rf_pred_raw_idx_or_label}, Proba vector (first 5): {rf_proba_vector[:5]}") # ADDED LOG
+
             if rf_classes is not None:
                 try:
                     if isinstance(rf_pred_raw_idx_or_label, (int, np.integer)) and 0 <= rf_pred_raw_idx_or_label < len(rf_classes):
@@ -228,13 +199,15 @@ def scan_file_route():
                         rf_prediction_label_from_model = str(rf_pred_raw_idx_or_label)
                         class_idx_for_confidence = list(rf_classes).index(rf_prediction_label_from_model)
                         rf_top_class_confidence = float(rf_proba_vector[class_idx_for_confidence]) * 100
-                except (IndexError, ValueError):
-                    logger.warning(f"Could not reliably map RF prediction '{rf_pred_raw_idx_or_label}' to class name or get its direct probability. Using max probability as fallback.")
+                except (IndexError, ValueError) as map_err:
+                    logger.warning(f"Could not reliably map RF prediction '{rf_pred_raw_idx_or_label}' to class name or get its direct probability: {map_err}. Using max probability as fallback.")
                     rf_prediction_label_from_model = str(rf_pred_raw_idx_or_label) 
                     rf_top_class_confidence = float(np.max(rf_proba_vector)) * 100
             else: 
                 rf_prediction_label_from_model = str(rf_pred_raw_idx_or_label)
                 rf_top_class_confidence = float(np.max(rf_proba_vector)) * 100
+            
+            logger.info(f"RF for '{filename}': Predicted Label='{rf_prediction_label_from_model}', Top Confidence={rf_top_class_confidence:.2f}%") # ADDED LOG
 
             if ae_is_malware: 
                 final_type_label = rf_prediction_label_from_model 
@@ -258,10 +231,10 @@ def scan_file_route():
                         confidence_to_display = 99.0 
                 else: 
                     confidence_to_display = 99.0
+            logger.info(f"Hybrid Verdict for '{filename}': Final Type='{final_type_label}', Confidence Displayed={confidence_to_display:.2f}%, Risk='{risk_level}'") # ADDED LOG
         except Exception as e:
             logger.error(f"Error during model prediction for '{filename}': {e}", exc_info=True)
 
-        # --- 5. Prepare Scan Result Data ---
         current_timestamp_obj = datetime.datetime.utcnow()
         scan_result_data = {
             "fileName": filename,
@@ -276,29 +249,7 @@ def scan_file_route():
             "aeThreshold": round(float(mse_threshold), 6)
         }
         
-        # --- 6. Save to Firestore (COMMENTED OUT FOR DUMMY DATA) ---
-        # if db:
-        #     try:
-        #         current_app_id = app_id_str if 'app_id_str' in globals() and app_id_str else 'unknown_app'
-        #         scan_log_data_for_db = {
-        #             "filename": filename,
-        #             "timestamp": current_timestamp_obj, # Firestore Timestamp object
-        #             "isMalware": ae_is_malware,
-        #             "malwareType": final_type_label,
-        #             "confidenceScore": round(confidence_to_display, 2),
-        #             "riskLevel": risk_level,
-        #             "fileExtension": file_ext
-        #         }
-        #         scan_history_ref = db.collection('scan_history_public') 
-        #         doc_ref = scan_history_ref.add(scan_log_data_for_db)
-        #         logger.info(f"Scan result for '{filename}' would be saved to Firestore with ID: {doc_ref[1].id}")
-        #     except Exception as e_fs:
-        #         logger.error(f"Error saving scan result to Firestore for '{filename}': {e_fs}", exc_info=True)
-        # else:
-        #     logger.info(f"Dummy mode: Scan result for '{filename}' not saved to DB.")
         logger.info(f"Dummy mode: Scan result for '{filename}' not saved to DB (Firestore disabled).")
-
-
         logger.info(f"Final scan result for '{filename}': {scan_result_data}")
         return jsonify(scan_result_data)
 
@@ -306,33 +257,32 @@ def scan_file_route():
         logger.error(f"Unhandled exception processing file '{filename}': {e}", exc_info=True)
         return jsonify({'status': 'error', 'message': f'An unexpected server error occurred during scan.'}), 500
     finally:
-        # --- Cleanup Temporary File and Directory ---
-        if 'temp_file_path' in locals() and os.path.exists(temp_file_path):
+        if temp_file_path and os.path.exists(temp_file_path):
             try:
                 os.remove(temp_file_path)
                 logger.debug(f"Temporary file {temp_file_path} removed.")
             except Exception as e_rem_file:
                 logger.error(f"Error removing temporary file {temp_file_path}: {e_rem_file}", exc_info=True)
-        if 'request_temp_dir' in locals() and os.path.exists(request_temp_dir):
+        
+        if request_temp_dir and os.path.exists(request_temp_dir):
             try:
-                os.rmdir(request_temp_dir)
-                logger.debug(f"Temporary directory {request_temp_dir} removed.")
+                shutil.rmtree(request_temp_dir)
+                logger.debug(f"Temporary directory {request_temp_dir} and its contents removed.")
             except Exception as e_rem_dir:
                 logger.error(f"Error removing temporary directory {request_temp_dir}: {e_rem_dir}", exc_info=True)
 
-# --- New Admin API Endpoint (Serves DUMMY DATA) ---
+# --- Admin API Endpoint (Serves DUMMY DATA) ---
 @app.route('/api/admin/top-scans', methods=['GET'])
 def get_top_scans():
     logger.info("Admin request for top scans received (serving dummy data).")
     if not MODELS_LOADED: 
         return jsonify({"error": "Service not fully available (models not loaded)"}), 503
     
-    # --- DUMMY DATA GENERATION ---
     dummy_scans = []
     malware_types = ["Trojan", "Ransomware", "Spyware"]
     risk_levels = ["High", "Critical", "Medium"]
     
-    for i in range(random.randint(5, 20)): # Generate a random number of dummy scans
+    for i in range(random.randint(5, 20)): 
         days_ago = random.randint(0, 6)
         hours_ago = random.randint(0, 23)
         minutes_ago = random.randint(0, 59)
@@ -343,41 +293,15 @@ def get_top_scans():
             "id": f"dummy_scan_{i+1}",
             "timestamp": scan_time.strftime('%Y-%m-%d %H:%M:%S UTC'),
             "filename": f"malware_sample_{i+1}.exe",
-            "isMalware": True, # All dummy scans are malware for this example
+            "isMalware": True, 
             "malwareType": random.choice(malware_types),
             "confidenceScore": round(random.uniform(70.0, 99.9), 2),
             "riskLevel": random.choice(risk_levels)
         }
         dummy_scans.append(dummy_scan)
         
-    # Sort dummy scans by confidence score (descending)
     dummy_scans_sorted = sorted(dummy_scans, key=lambda x: x.get('confidenceScore', 0), reverse=True)
-    
     return jsonify(dummy_scans_sorted)
-
-    # --- ORIGINAL FIRESTORE LOGIC (COMMENTED OUT) ---
-    # if not db:
-    #     return jsonify({"error": "Database service not available (dummy mode)"}), 503
-    # try:
-    #     seven_days_ago = datetime.datetime.utcnow() - datetime.timedelta(days=7)
-    #     query_ref = db.collection('scan_history_public')
-    #     query = query_ref.where(filter=FieldFilter("isMalware", "==", True)) \
-    #                      .where(filter=FieldFilter("timestamp", ">=", seven_days_ago)) \
-    #                      .order_by("timestamp", direction=firestore.Query.DESCENDING) 
-    #     results = query.limit(50).stream()
-    #     top_scans = []
-    #     for doc in results:
-    #         scan_data = doc.to_dict()
-    #         scan_data['id'] = doc.id
-    #         if isinstance(scan_data.get('timestamp'), datetime.datetime):
-    #             scan_data['timestamp'] = scan_data['timestamp'].strftime('%Y-%m-%d %H:%M:%S UTC')
-    #         top_scans.append(scan_data)
-    #     top_scans_sorted = sorted(top_scans, key=lambda x: x.get('confidenceScore', 0), reverse=True)
-    #     return jsonify(top_scans_sorted[:20])
-    # except Exception as e:
-    #     logger.error(f"Error fetching top scans: {e}", exc_info=True)
-    #     return jsonify({"error": "Failed to retrieve top scans", "details": str(e)}), 500
-
 
 if __name__ == '__main__':
     logger.info(f"Flask app starting. Current working directory: {os.getcwd()}")
