@@ -5,11 +5,12 @@
       <h2>Scan Complete</h2>
 
       <div class="status-header">
-        <img :src="statusIcon" alt="Status" class="status-icon" />
+        <span class="status-emoji-icon">{{ statusIconEmoji }}</span>
         <div class="status-text">
           <span v-if="scanDataComputed.isMalware" class="malware-detected">Malware Detected!</span>
           <span v-else class="no-malware">No Malware Detected</span>
-          </div>
+          <span v-if="scanDataComputed.riskLevel" class="risk-level" :class="riskClass">{{ scanDataComputed.riskLevel }}</span>
+        </div>
       </div>
 
       <div class="file-details">
@@ -30,8 +31,8 @@
       </div>
       <div class="threat-info-simplified" v-else>
         <p>The file appears to be safe.</p>
+         <p v-if="typeof scanDataComputed.confidenceScore === 'number'"><strong>Confidence:</strong> {{ scanDataComputed.confidenceScore?.toFixed(2) }}%</p>
       </div>
-
 
       <div class="actions">
         <button class="action-btn reanalyze-btn" @click="reanalyze">Reanalyze</button>
@@ -47,41 +48,58 @@ export default {
     scanData: {
       type: Object,
       required: true,
-      default: () => ({ // Sensible defaults for a cleaner initial render
+      default: () => ({
         fileName: 'N/A',
         isMalware: false,
         malwareType: 'N/A',
         confidenceScore: 0,
-        scanTime: 'N/A'
+        scanTime: 'N/A',
+        riskLevel: 'N/A' // Added default for riskLevel
       })
     }
   },
   computed: {
-    // Use a computed property to handle potential undefined scanData on initial load
     scanDataComputed() {
-      return this.scanData || this.$props.scanData.default();
+      // Ensure scanData is an object, provide defaults if top-level keys are missing
+      const defaults = {
+        fileName: 'N/A',
+        isMalware: false,
+        malwareType: 'N/A',
+        confidenceScore: 0,
+        scanTime: 'N/A',
+        riskLevel: 'Undetermined', // Default risk level
+        ...this.scanData // Spread incoming scanData over defaults
+      };
+      return defaults;
     },
-    statusIcon() {
-      // Ensure you have these images in your public/assets folder or use other icons
-      if (this.scanDataComputed.isMalware) {
-        return '/img/malware_icon.png'; // Replace with your actual malware icon path
+    statusIconEmoji() {
+      if (this.scanDataComputed && this.scanDataComputed.isMalware !== undefined) {
+        return this.scanDataComputed.isMalware ? '⚠️' : '✔️'; // Warning for malware, Check for safe
+        // Alternatives: '❌' for malware, '✅' for safe
       }
-      return '/img/safe_icon.png'; // Replace with your actual safe icon path
+      return '❓'; // Default for unknown status
+    },
+    riskClass() { // Kept if you still want to style the risk level text
+      if (!this.scanDataComputed.riskLevel || this.scanDataComputed.riskLevel === 'N/A') return 'risk-unknown';
+      return `risk-${this.scanDataComputed.riskLevel.toLowerCase().replace(/\s+/g, '-')}`;
     }
-    // riskClass can be removed if riskLevel is not a primary display item anymore
   },
   methods: {
-    // severityClass can be removed if not used
     reanalyze() {
       this.$emit('reanalyze-request', this.scanDataComputed.fileName);
       this.$emit('close');
-    }
+    },
+    // severityClass can be removed if not used
+    // severityClass(severity) {
+    //   if (!severity) return '';
+    //   return `severity-${severity.toLowerCase()}`;
+    // }
   }
 };
 </script>
 
 <style scoped>
-/* Using your provided styles - no changes needed here unless you want to adjust for the simplified content */
+/* Using your provided styles - minor adjustments for emoji icon */
 .modal-overlay {
   position: fixed;
   top: 0;
@@ -101,7 +119,7 @@ export default {
   border-radius: 8px;
   box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
   width: 90%;
-  max-width: 500px; /* Can make it a bit narrower for simpler content */
+  max-width: 500px;
   position: relative;
 }
 
@@ -121,7 +139,7 @@ export default {
 
 .scan-result-popup h2 {
   margin-top: 0;
-  margin-bottom: 20px; /* Added more space */
+  margin-bottom: 20px;
   font-size: 1.5em;
   color: #333;
   text-align: center;
@@ -135,50 +153,58 @@ export default {
     border-bottom: 1px solid #eee;
 }
 
-.status-icon {
-    width: 40px; /* Adjusted size */
-    height: 40px;
+.status-emoji-icon { /* Style for the emoji */
+    font-size: 2.5em; /* Adjust size as needed */
     margin-right: 15px;
-    /* You'll need to provide actual image paths for statusIcon computed property */
+    line-height: 1; /* Ensures proper vertical alignment */
 }
 
 .status-text .malware-detected {
-    font-size: 1.25em; /* Slightly adjusted */
+    font-size: 1.25em;
     font-weight: bold;
     color: #d9534f; 
     display: block;
 }
 .status-text .no-malware {
-    font-size: 1.25em; /* Slightly adjusted */
+    font-size: 1.25em;
     font-weight: bold;
     color: #5cb85c; 
     display: block;
 }
 
-/* Risk level display is removed from the template, so .risk-level and .high-risk can be removed if not used elsewhere */
+.risk-level {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 0.9em;
+    font-weight: bold;
+    color: white;
+    margin-top: 5px;
+}
+.risk-critical { background-color: #7c0a02; }
+.risk-high { background-color: #d9534f; }
+.risk-medium { background-color: #f0ad4e; }
+.risk-low { background-color: #5bc0de; }
+.risk-unknown { background-color: #aaa; }
+
 
 .file-details {
-  /* display: grid; */ /* Can simplify if fewer details */
-  /* grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); */
-  /* gap: 15px; */
   margin-bottom: 20px;
-  font-size: 0.95em; /* Slightly larger base font */
+  font-size: 0.95em;
 }
 
 .file-details div {
-  margin-bottom: 8px; /* Space between file detail items */
+  margin-bottom: 8px;
 }
 .file-details strong {
     display: block;
     color: #555;
-    margin-bottom: 4px; /* More space */
+    margin-bottom: 4px;
 }
 .file-details p {
   margin: 0;
   color: #333;
 }
-
-/* Removed .file-icon-placeholder as it's not in the simplified template */
 
 .threat-info-simplified {
   margin-bottom: 25px;
@@ -196,9 +222,6 @@ export default {
   margin: 5px 0;
   font-size: 1em;
 }
-
-
-/* Table styles for threat-details-section can be removed if you're not using the table anymore */
 
 .actions {
   display: flex;
@@ -218,10 +241,5 @@ export default {
 }
 .action-btn:hover {
     background-color: #e9e9e9;
-}
-
-/* .details-btn and .download-btn can be removed if not used */
-.reanalyze-btn {
-  /* Add specific styles if needed */
 }
 </style>

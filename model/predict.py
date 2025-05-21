@@ -32,7 +32,7 @@ except Exception as e:
 # This script expects a CSV file named "sample_input_for_prediction.csv" in the same directory
 # This CSV should contain ONLY THE FEATURES, with column names matching those used during training.
 # It should NOT contain target labels like 'Class' or 'Category'.
-INPUT_CSV_PATH = "sample_input_for_prediction.csv" 
+INPUT_CSV_PATH = "Ransomeware.csv" 
 print(f"📄 Loading input data from '{INPUT_CSV_PATH}'...")
 if not os.path.exists(INPUT_CSV_PATH):
     print(f"❌ Input file not found: {INPUT_CSV_PATH}")
